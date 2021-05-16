@@ -1,0 +1,10 @@
+[package]
+name = "autobatcher"
+version = "0.1.0"
+authors = ["Johan Følsgaard <johan@foelsgaard.eu>"]
+edition = "2018"
+license = "MIT OR Apache-2.0"
+
+[dependencies]
+futures = "0.3.8"
+slab = "0.4.3"
