@@ -301,3 +301,64 @@ impl ArcWake for Notifier {
         }
     }
 }
+
+#[cfg(test)]
+mod test {
+    use super::*;
+    use std::time::Duration;
+    use futures::{future, stream};
+    use futures::stream::{FuturesOrdered, StreamExt};
+    use tokio;
+    use tokio_stream::wrappers::IntervalStream;
+
+    struct TestContext;
+
+    impl Context<usize, usize> for TestContext {
+        type Fut = future::Ready<Vec<usize>>;
+
+        fn call(&mut self, requests: &[usize]) -> Self::Fut {
+            future::ready(requests.to_vec())
+        }
+    }
+
+    #[tokio::test]
+    async fn test_order_sync() {
+        let context = TestContext;
+        let signal = IntervalStream::new(tokio::time::interval(Duration::from_micros(500)));
+        let batcher = Batcher::new(signal, context);
+
+        let mut tasks = FuturesOrdered::new();
+
+        const N: usize = 10000;
+
+        let requests: Vec<usize> = (0..N).collect();
+
+        for n in requests.iter() {
+            tasks.push(batcher.call(*n));
+        }
+
+        let responses: Vec<usize> = tasks.collect().await;
+
+        assert_eq!(requests, responses);
+    }
+
+    #[tokio::test]
+    async fn test_order_async() {
+        let context = TestContext;
+        let signal = IntervalStream::new(tokio::time::interval(Duration::from_micros(500)));
+        let batcher = Batcher::new(signal, context);
+
+        const N: usize = 10000;
+
+        let requests: Vec<usize> = (0..N).collect();
+        let mut tasks = FuturesOrdered::new();
+
+        for n in requests.iter() {
+            tasks.push(tokio::spawn(batcher.call(*n)));
+        }
+
+        let responses: Vec<usize> = tasks.flat_map(stream::iter).collect().await;
+
+        assert_eq!(requests, responses);
+    }
+}

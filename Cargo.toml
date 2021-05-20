@@ -8,3 +8,7 @@ license = "MIT OR Apache-2.0"
 [dependencies]
 futures = "0.3.15"
 slab = "0.4.3"
+
+[dev-dependencies]
+tokio = { version = "1.6.0", features = ["macros", "rt-multi-thread"] }
+tokio-stream = "0.1.6"
