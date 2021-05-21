@@ -7,25 +7,27 @@ use std::pin::Pin;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 
-pub trait Context<REQ, RESP> {
-    type Fut: Future<Output = Vec<RESP>>;
+pub trait Context {
+    type Request;
+    type Response;
+    type Fut: Future<Output = Vec<Self::Response>>;
 
-    fn call(&mut self, requests: &[REQ]) -> Self::Fut;
+    fn call(&mut self, requests: &[Self::Request]) -> Self::Fut;
 }
 
-pub struct Batcher<SIG, REQ, RESP, CTX: Context<REQ, RESP>> {
-    inner: Arc<Inner<SIG, REQ, RESP, CTX>>,
+pub struct Batcher<SIG, CTX: Context> {
+    inner: Arc<Inner<SIG, CTX>>,
 }
 
-pub struct BatchingCall<SIG, REQ, RESP, CTX: Context<REQ, RESP>> {
-    request: Option<REQ>,
+pub struct BatchingCall<SIG, CTX: Context> {
+    request: Option<CTX::Request>,
     index: usize,
     batch_index: bool,
-    inner: Option<Arc<Inner<SIG, REQ, RESP, CTX>>>,
+    inner: Option<Arc<Inner<SIG, CTX>>>,
     waker_key: usize,
 }
 
-impl<SIG, REQ, RESP, CTX: Context<REQ, RESP>> Clone for Batcher<SIG, REQ, RESP, CTX> {
+impl<SIG, CTX: Context> Clone for Batcher<SIG, CTX> {
     fn clone(&self) -> Self {
         Self {
             inner: Arc::clone(&self.inner),
@@ -33,7 +35,7 @@ impl<SIG, REQ, RESP, CTX: Context<REQ, RESP>> Clone for Batcher<SIG, REQ, RESP, 
     }
 }
 
-impl<SIG, REQ, RESP, CTX: Context<REQ, RESP>> Batcher<SIG, REQ, RESP, CTX> {
+impl<SIG, CTX: Context> Batcher<SIG, CTX> {
     pub fn new(signal: SIG, context: CTX) -> Self {
         Self {
             inner: Arc::new(Inner {
@@ -56,7 +58,7 @@ impl<SIG, REQ, RESP, CTX: Context<REQ, RESP>> Batcher<SIG, REQ, RESP, CTX> {
         }
     }
 
-    pub fn call(&self, request: REQ) -> BatchingCall<SIG, REQ, RESP, CTX> {
+    pub fn call(&self, request: CTX::Request) -> BatchingCall<SIG, CTX> {
         BatchingCall {
             request: Some(request),
             index: 0,
@@ -67,7 +69,7 @@ impl<SIG, REQ, RESP, CTX: Context<REQ, RESP>> Batcher<SIG, REQ, RESP, CTX> {
     }
 }
 
-struct Inner<SIG, REQ, RESP, CTX: Context<REQ, RESP>> {
+struct Inner<SIG, CTX: Context> {
     notifier: Arc<Notifier>,
 
     context: UnsafeCell<CTX>,
@@ -76,22 +78,22 @@ struct Inner<SIG, REQ, RESP, CTX: Context<REQ, RESP>> {
     signal_state: AtomicUsize,
 
     call: UnsafeCell<Option<CTX::Fut>>,
-    call_buffer: UnsafeCell<Vec<REQ>>,
+    call_buffer: UnsafeCell<Vec<CTX::Request>>,
     call_state: AtomicUsize,
 
     switch: AtomicBool,
-    inbox: Mutex<Vec<REQ>>,
-    outbox: Mutex<Slab<RESP>>,
+    inbox: Mutex<Vec<CTX::Request>>,
+    outbox: Mutex<Slab<CTX::Response>>,
 }
 
-unsafe impl<SIG, REQ, RESP, CTX: Context<REQ, RESP>> Send for Inner<SIG, REQ, RESP, CTX>
+unsafe impl<SIG, CTX: Context> Send for Inner<SIG, CTX>
 where
     CTX: Send,
     CTX::Fut: Send,
     <CTX::Fut as Future>::Output: Send + Sync,
 {
 }
-unsafe impl<SIG, REQ, RESP, CTX: Context<REQ, RESP>> Sync for Inner<SIG, REQ, RESP, CTX>
+unsafe impl<SIG, CTX: Context> Sync for Inner<SIG, CTX>
 where
     CTX: Send,
     CTX::Fut: Send,
@@ -111,10 +113,10 @@ const POISONED: usize = 4;
 
 const NULL_WAKER_KEY: usize = usize::max_value();
 
-impl<SIG, REQ, RESP, CTX: Context<REQ, RESP>> Unpin for BatchingCall<SIG, REQ, RESP, CTX> {}
+impl<SIG, CTX: Context> Unpin for BatchingCall<SIG, CTX> {}
 
-impl<SIG: Stream, REQ, RESP, CTX: Context<REQ, RESP>> Future for BatchingCall<SIG, REQ, RESP, CTX> {
-    type Output = RESP;
+impl<SIG: Stream, CTX: Context> Future for BatchingCall<SIG, CTX> {
+    type Output = CTX::Response;
 
     fn poll(
         mut self: Pin<&mut Self>,
@@ -279,7 +281,7 @@ impl Notifier {
     }
 }
 
-impl<SIG, REQ, RESP, CTX: Context<REQ, RESP>> Drop for BatchingCall<SIG, REQ, RESP, CTX> {
+impl<SIG, CTX: Context> Drop for BatchingCall<SIG, CTX> {
     fn drop(&mut self) {
         if self.waker_key != NULL_WAKER_KEY {
             if let Some(ref inner) = self.inner {
