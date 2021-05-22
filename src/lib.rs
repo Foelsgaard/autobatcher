@@ -10,9 +10,9 @@ use std::sync::{Arc, Mutex};
 pub trait Context {
     type Request;
     type Response;
-    type Fut: Future<Output = Vec<Self::Response>>;
+    type Call: Future<Output = Vec<Self::Response>>;
 
-    fn call(&mut self, requests: &[Self::Request]) -> Self::Fut;
+    fn call(&mut self, requests: &[Self::Request]) -> Self::Call;
 }
 
 pub struct Batcher<SIG, CTX: Context> {
@@ -77,7 +77,7 @@ struct Inner<SIG, CTX: Context> {
     signal: UnsafeCell<SIG>,
     signal_state: AtomicUsize,
 
-    call: UnsafeCell<Option<CTX::Fut>>,
+    call: UnsafeCell<Option<CTX::Call>>,
     call_buffer: UnsafeCell<Vec<CTX::Request>>,
     call_state: AtomicUsize,
 
@@ -89,15 +89,15 @@ struct Inner<SIG, CTX: Context> {
 unsafe impl<SIG, CTX: Context> Send for Inner<SIG, CTX>
 where
     CTX: Send,
-    CTX::Fut: Send,
-    <CTX::Fut as Future>::Output: Send + Sync,
+    CTX::Call: Send,
+    <CTX::Call as Future>::Output: Send + Sync,
 {
 }
 unsafe impl<SIG, CTX: Context> Sync for Inner<SIG, CTX>
 where
     CTX: Send,
-    CTX::Fut: Send,
-    <CTX::Fut as Future>::Output: Send + Sync,
+    CTX::Call: Send,
+    <CTX::Call as Future>::Output: Send + Sync,
 {
 }
 
@@ -316,9 +316,9 @@ mod test {
     struct TestContext;
 
     impl Context<usize, usize> for TestContext {
-        type Fut = future::Ready<Vec<usize>>;
+        type Call = future::Ready<Vec<usize>>;
 
-        fn call(&mut self, requests: &[usize]) -> Self::Fut {
+        fn call(&mut self, requests: &[usize]) -> Self::Call {
             future::ready(requests.to_vec())
         }
     }
